@@ -744,9 +744,9 @@ def genWavFile(timidity, midiPath):
     progress("Running TiMidity++ on %s to generate .wav audio ..." % midiPath)
     dirname, midiFile = os.path.split(midiPath)
     os.chdir(dirname)
-    cmd = [timidity, midiFile, "-Ow"]
-    progress(safeRun(cmd, exitcode=11))
     wavExpected = midiPath.replace('.midi', '.wav')
+    cmd = ["/usr/bin/fluidsynth", "-F", wavExpected, "-O", "double", "/home/dev/Musique/sf2/JJazzLab-SoundFont.sf2", midiFile]
+    progress(safeRun(cmd, exitcode=11))
     if not os.path.exists(wavExpected):
         bug("TiMidity++ failed to generate %s" % wavExpected)
     return wavExpected
@@ -835,6 +835,18 @@ def parseOptions():
         'scroll the notation from right to left and keep the '
         'cursor in the centre',
         action="store_true", default=False)
+
+    group_audio = parser.add_argument_group(title='Audio Input and output')
+
+    group_audio.add_argument(
+        "--no-audio", dest="noaudio",
+        help="Disable audio support. You'll have to manage it on your own",
+        metavar="NOAUDIO", default=False)
+
+    group_audio.add_argument(
+        "-a", "--audio", dest="wav",
+        help='Path to provided .wav file to be used instead of generating one with Timidity',
+        metavar="WAV", default=None)
 
     group_video = parser.add_argument_group(title='Video output')
 
@@ -1406,79 +1418,7 @@ def sanitiseLy(lyFile, dumper, width, height, dpi, numStaffLines,
 
     line = fLyFile.readline()
     while line != "":
-        # ignore these commands
-        if line.find("#(set-global-staff-size") != -1 or \
-           line.find("\\bookOutputName") != -1:
-            pass
-
-        # if I find version, write own paper block right behind it
-        elif line.find("\\version") != -1:
-            fSanitisedLyFile.write(line)
-            leftPaperMarginPx = writePaperHeader(
-                fSanitisedLyFile, width, height, dpi, numStaffLines, lilypondVersion)
-            paperBlock = True
-
-        # get needed info from header block and ignore it
-        elif (line.find("\\header") != -1 or headerPart):
-            if line.find("\\header") != -1:
-                fSanitisedLyFile.write(
-                    "\\header {\n   tagline = ##f composer = ##f\n}\n")
-                headerPart = True
-
-            if re.search("\\btitle\\s*=", line):
-                titleText.name = line.split("=")[-1].strip()[1:-1]
-            if re.search("composer\\s*=", line):
-                titleText.author = line.split("=")[-1].strip()[1:-1]
-
-            for char in line:
-                if char == "{":
-                    bracketsHeader += 1
-                elif char == "}":
-                    bracketsHeader -= 1
-            if bracketsHeader == 0:
-                headerPart = False
-
-        # ignore paper block
-        elif (line.find("\\paper") != -1 or paperPart):
-            debug("paperPart: %s" % line.rstrip())
-            if line.find("\\paper") != -1:
-                paperPart = True
-                debug(">> in paperPart")
-
-            for char in line:
-                if char == "{":
-                    bracketsPaper += 1
-                    debug("  bracketsPaper += 1")
-                elif char == "}":
-                    bracketsPaper -= 1
-                    debug("  bracketsPaper -= 1")
-            if bracketsPaper == 0:
-                paperPart = False
-                debug("<< leaving paperPart")
-
-        # add unfoldRepeats right after start of score block
-        elif re.search("\\\\score\\s*\\{", line):
-            fSanitisedLyFile.write(line + " \\unfoldRepeats\n")
-
-        # parse other lines, ignore page breaking commands and articulate
-        elif not headerPart and not paperPart:
-            finalLine = ""
-
-            if line.find("\\break") != -1:
-                finalLine = (line[:line.find("\\break")]
-                             + line[line.find("\\break") + len("\\break"):])
-            elif line.find("\\noBreak") != -1:
-                finalLine = (line[:line.find("\\noBreak")]
-                             + line[line.find("\\noBreak") + len("\\noBreak"):])
-            elif line.find("\\pageBreak") != -1:
-                finalLine = (line[:line.find("\\pageBreak")] +
-                             line[line.find("\\pageBreak") +
-                             len("\\pageBreak"):])
-            else:
-                finalLine = line
-
-            fSanitisedLyFile.write(finalLine)
-
+        fSanitisedLyFile.write(line)
         line = fLyFile.readline()
 
     fLyFile.close()
@@ -1492,7 +1432,7 @@ def sanitiseLy(lyFile, dumper, width, height, dpi, numStaffLines,
     progress("Wrote sanitised version of %s into %s" %
              (lyFile, sanitisedLyFileName))
 
-    return sanitisedLyFileName, leftPaperMarginPx
+    return sanitisedLyFileName, 200
 
 
 def main():
@@ -1513,6 +1453,7 @@ def main():
     - create a video file from the individual frames
     """
     options = parseOptions()
+
 
     lilypondVersion, ffmpeg, timidity = findExecutableDependencies(options)
 
@@ -1606,7 +1547,12 @@ def main():
     #  frameWriter.write()
     output_divider_line()
 
-    wavPath = genWavFile(timidity, midiPath)
+    wavPath = None
+    if options.noaudio is False:
+        if not options.wav:
+            wavPath = genWavFile(timidity, midiPath)
+        else:
+            wavPath = options.wav
 
     output_divider_line()
 
